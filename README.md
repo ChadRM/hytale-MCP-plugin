@@ -11,6 +11,8 @@ Connect AI assistants like OpenCode, Claude, ChatGPT, and Gemini directly to you
 [![Java](https://img.shields.io/badge/java-25-orange.svg)](https://www.oracle.com/java/)
 [![MCP](https://img.shields.io/badge/MCP-Protocol-purple.svg)](https://modelcontextprotocol.io)
 
+Guide: https://top-games.net/guides/connect-ai-hytale-server-mcp
+
 [Features](#features) • [Installation](#installation) • [Configuration](#configuration) • [Usage](#usage) • [API](#api-reference) • [Contributing](#contributing)
 
 ---
