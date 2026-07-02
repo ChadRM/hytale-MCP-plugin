@@ -5,15 +5,17 @@ import com.google.gson.JsonObject;
 import com.hypixel.hytale.logger.HytaleLogger;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
+import com.hypixel.hytale.server.core.universe.world.World;
 import com.top_serveurs.hytale.plugins.mcp.auth.McpAuthManager;
 import com.top_serveurs.hytale.plugins.mcp.config.McpConfig;
 import com.top_serveurs.hytale.plugins.mcp.models.McpTool;
 import com.top_serveurs.hytale.plugins.mcp.models.McpToolCall;
 import com.top_serveurs.hytale.plugins.mcp.models.McpToolResponse;
 
-import java.util.List;
+import java.util.Collection;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 public class GetPlayerPositionFeature implements McpFeature {
     private static final Gson GSON = new Gson();
@@ -56,30 +58,53 @@ public class GetPlayerPositionFeature implements McpFeature {
             }
 
             String playerIdentifier = args.get("player").toString();
-            PlayerRef player = findPlayer(playerIdentifier);
 
-            if (player == null) {
-                return McpToolResponse.error("Player not found: " + playerIdentifier);
+            Map<String, World> worlds = Universe.get().getWorlds();
+            if (worlds.isEmpty()) {
+                return McpToolResponse.error("No world available to get player position");
             }
+            World world = worlds.values().iterator().next();
 
-            com.hypixel.hytale.math.vector.Transform transform = player.getTransform();
-            com.hypixel.hytale.math.vector.Vector3d pos = transform.getPosition();
-            com.hypixel.hytale.math.vector.Vector3f rotation = transform.getRotation();
+            // Universe/PlayerRef state (including live transform) must be read on the
+            // owning world's thread, otherwise the MCP SDK's blocking sync tool call
+            // hangs forever with no exception (the Jetty request thread is not the
+            // world thread).
+            CompletableFuture<McpToolResponse> future = new CompletableFuture<>();
 
-            JsonObject position = new JsonObject();
-            position.addProperty("x", pos.getX());
-            position.addProperty("y", pos.getY());
-            position.addProperty("z", pos.getZ());
-            position.addProperty("worldUuid", player.getWorldUuid().toString());
-            position.addProperty("yaw", rotation.getY());
-            position.addProperty("pitch", rotation.getX());
+            world.execute(() -> {
+                try {
+                    PlayerRef player = findPlayer(playerIdentifier);
 
-            JsonObject response = new JsonObject();
-            response.addProperty("name", player.getUsername());
-            response.addProperty("uuid", player.getUuid().toString());
-            response.add("position", position);
+                    if (player == null) {
+                        future.complete(McpToolResponse.error("Player not found: " + playerIdentifier));
+                        return;
+                    }
 
-            return McpToolResponse.success(GSON.toJson(response));
+                    com.hypixel.hytale.math.vector.Transform transform = player.getTransform();
+                    org.joml.Vector3d pos = transform.getPosition();
+                    com.hypixel.hytale.math.vector.Rotation3f rotation = transform.getRotation();
+
+                    JsonObject position = new JsonObject();
+                    position.addProperty("x", pos.x());
+                    position.addProperty("y", pos.y());
+                    position.addProperty("z", pos.z());
+                    position.addProperty("worldUuid", player.getWorldUuid().toString());
+                    position.addProperty("yaw", rotation.yaw());
+                    position.addProperty("pitch", rotation.pitch());
+
+                    JsonObject response = new JsonObject();
+                    response.addProperty("name", player.getUsername());
+                    response.addProperty("uuid", player.getUuid().toString());
+                    response.add("position", position);
+
+                    future.complete(McpToolResponse.success(GSON.toJson(response)));
+                } catch (Throwable t) {
+                    logger.atSevere().withCause(t).log("Error getting player position");
+                    future.complete(McpToolResponse.error("Failed to get player position: " + t.getMessage()));
+                }
+            });
+
+            return future.join();
         } catch (Exception e) {
             logger.atSevere().withCause(e).log("Error getting player position");
             return McpToolResponse.error("Failed to get player position: " + e.getMessage());
@@ -87,7 +112,7 @@ public class GetPlayerPositionFeature implements McpFeature {
     }
 
     private PlayerRef findPlayer(String identifier) {
-        List<PlayerRef> players = Universe.get().getPlayers();
+        Collection<PlayerRef> players = Universe.get().getPlayers();
         
         try {
             UUID uuid = UUID.fromString(identifier);
