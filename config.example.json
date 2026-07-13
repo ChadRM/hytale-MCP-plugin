@@ -23,7 +23,8 @@
       "getServerInfo": false,
       "getBlock": false,
       "breakBlock": false,
-      "scanRegion": false
+      "scanRegion": false,
+      "getHeightmap": false
     },
     "admins": {
       "listPlayers": true,
@@ -39,9 +40,11 @@
       "getServerInfo": true,
       "getBlock": true,
       "breakBlock": true,
-      "scanRegion": true
+      "scanRegion": true,
+      "getHeightmap": true
     },
     "maxBlocksBatch": 1000,
-    "maxScanVolume": 32768
+    "maxScanVolume": 32768,
+    "maxHeightmapSamples": 10000
   }
 }

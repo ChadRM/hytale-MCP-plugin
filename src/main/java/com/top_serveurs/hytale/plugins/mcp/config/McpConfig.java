@@ -142,6 +142,7 @@ public class McpConfig {
         private FeaturePermissions admins = new FeaturePermissions();
         private int maxBlocksBatch = 1000;
         private int maxScanVolume = 32768;
+        private int maxHeightmapSamples = 10000;
 
         public FeaturePermissions getPlayers() {
             return players;
@@ -174,6 +175,14 @@ public class McpConfig {
         public void setMaxScanVolume(int maxScanVolume) {
             this.maxScanVolume = maxScanVolume;
         }
+
+        public int getMaxHeightmapSamples() {
+            return maxHeightmapSamples;
+        }
+
+        public void setMaxHeightmapSamples(int maxHeightmapSamples) {
+            this.maxHeightmapSamples = maxHeightmapSamples;
+        }
     }
 
     public static class FeaturePermissions {
@@ -191,6 +200,7 @@ public class McpConfig {
         private boolean getBlock = false;
         private boolean breakBlock = false;
         private boolean scanRegion = false;
+        private boolean getHeightmap = false;
 
         public boolean canListPlayers() {
             return listPlayers;
@@ -302,6 +312,14 @@ public class McpConfig {
 
         public void setScanRegion(boolean scanRegion) {
             this.scanRegion = scanRegion;
+        }
+
+        public boolean canGetHeightmap() {
+            return getHeightmap;
+        }
+
+        public void setGetHeightmap(boolean getHeightmap) {
+            this.getHeightmap = getHeightmap;
         }
     }
 }
