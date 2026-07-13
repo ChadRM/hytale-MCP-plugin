@@ -141,6 +141,7 @@ public class McpConfig {
         private FeaturePermissions players = new FeaturePermissions();
         private FeaturePermissions admins = new FeaturePermissions();
         private int maxBlocksBatch = 1000;
+        private int maxScanVolume = 32768;
 
         public FeaturePermissions getPlayers() {
             return players;
@@ -165,6 +166,14 @@ public class McpConfig {
         public void setMaxBlocksBatch(int maxBlocksBatch) {
             this.maxBlocksBatch = maxBlocksBatch;
         }
+
+        public int getMaxScanVolume() {
+            return maxScanVolume;
+        }
+
+        public void setMaxScanVolume(int maxScanVolume) {
+            this.maxScanVolume = maxScanVolume;
+        }
     }
 
     public static class FeaturePermissions {
@@ -181,6 +190,7 @@ public class McpConfig {
         private boolean listBlocks = false;
         private boolean getBlock = false;
         private boolean breakBlock = false;
+        private boolean scanRegion = false;
 
         public boolean canListPlayers() {
             return listPlayers;
@@ -284,6 +294,14 @@ public class McpConfig {
 
         public void setBreakBlock(boolean breakBlock) {
             this.breakBlock = breakBlock;
+        }
+
+        public boolean canScanRegion() {
+            return scanRegion;
+        }
+
+        public void setScanRegion(boolean scanRegion) {
+            this.scanRegion = scanRegion;
         }
     }
 }

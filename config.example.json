@@ -22,7 +22,8 @@
       "getWorldInfo": false,
       "getServerInfo": false,
       "getBlock": false,
-      "breakBlock": false
+      "breakBlock": false,
+      "scanRegion": false
     },
     "admins": {
       "listPlayers": true,
@@ -37,8 +38,10 @@
       "getWorldInfo": true,
       "getServerInfo": true,
       "getBlock": true,
-      "breakBlock": true
+      "breakBlock": true,
+      "scanRegion": true
     },
-    "maxBlocksBatch": 1000
+    "maxBlocksBatch": 1000,
+    "maxScanVolume": 32768
   }
 }
