@@ -88,6 +88,7 @@ public class McpPlugin extends JavaPlugin {
         featureRegistry.registerFeature(new BroadcastMessageFeature(logger, config));
         featureRegistry.registerFeature(new SetBlockFeature(logger));
         featureRegistry.registerFeature(new BreakBlockFeature(logger));
+        featureRegistry.registerFeature(new BreakBlocksBatchFeature(logger, config));
         featureRegistry.registerFeature(new SetBlocksBatchFeature(logger, config));
         featureRegistry.registerFeature(new FlattenTerrainFeature(logger, config));
         featureRegistry.registerFeature(new GetBuildingGuideFeature(logger, config));
