@@ -179,6 +179,7 @@ public class McpConfig {
         private boolean getWorldInfo = false;
         private boolean getServerInfo = false;
         private boolean listBlocks = false;
+        private boolean getBlock = false;
 
         public boolean canListPlayers() {
             return listPlayers;
@@ -266,6 +267,14 @@ public class McpConfig {
 
         public void setListBlocks(boolean listBlocks) {
             this.listBlocks = listBlocks;
+        }
+
+        public boolean canGetBlock() {
+            return getBlock;
+        }
+
+        public void setGetBlock(boolean getBlock) {
+            this.getBlock = getBlock;
         }
     }
 }

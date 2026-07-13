@@ -20,7 +20,8 @@
       "getBlockTypes": false,
       "listBlocks": false,
       "getWorldInfo": false,
-      "getServerInfo": false
+      "getServerInfo": false,
+      "getBlock": false
     },
     "admins": {
       "listPlayers": true,
@@ -33,7 +34,8 @@
       "getBlockTypes": true,
       "listBlocks": true,
       "getWorldInfo": true,
-      "getServerInfo": true
+      "getServerInfo": true,
+      "getBlock": true
     },
     "maxBlocksBatch": 1000
   }

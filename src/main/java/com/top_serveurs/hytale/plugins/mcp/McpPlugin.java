@@ -81,6 +81,7 @@ public class McpPlugin extends JavaPlugin {
         featureRegistry.registerFeature(new ListPlayersFeature(logger));
         featureRegistry.registerFeature(new GetPlayerPositionFeature(logger));
         featureRegistry.registerFeature(new ListBlocksFeature(logger));
+        featureRegistry.registerFeature(new GetBlockFeature(logger));
         featureRegistry.registerFeature(new ExecuteCommandFeature(logger, config));
         featureRegistry.registerFeature(new GiveItemFeature(logger, config));
         featureRegistry.registerFeature(new BroadcastMessageFeature(logger, config));
