@@ -6,6 +6,7 @@ import com.hypixel.hytale.logger.HytaleLogger;
 import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.Rotation;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.RotationTuple;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
@@ -117,15 +118,19 @@ public class SetBlockFeature implements McpFeature {
                     future.complete(McpToolResponse.error("Chunk not loaded at (" + x + "," + y + "," + z + ")"));
                     return;
                 }
-                // Overwriting an already-solid block in place (same or different blockType) can
-                // silently fail to persist - confirmed by immediate read-back mismatches on both
-                // rotation-only and full blockType changes. Breaking to air first reliably avoids
-                // this, so always do it when the target isn't already air.
-                BlockType existing = chunk.getBlockType(x, y, z);
-                if (existing != null && existing != BlockType.EMPTY) {
-                    chunk.breakBlock(x, y, z, 0);
+                // The 8-arg placeBlock convenience overload always runs with an internal
+                // test=true occupancy check (testPlaceBlock), which rejects placement over any
+                // already-solid block and returns false without writing - previously worked
+                // around by breaking to air first. The 7-arg overload exposes the test flag
+                // directly; passing test=false skips the occupancy check and writes straight
+                // through for both air and occupied targets in one call, no break needed.
+                RotationTuple rotationTuple = RotationTuple.of(rotation, Rotation.None, Rotation.None);
+                boolean placed = chunk.placeBlock(x, y, z, blockType.getId(), rotationTuple, 0, false);
+
+                if (!placed) {
+                    future.complete(McpToolResponse.error("placeBlock rejected the placement at (" + x + "," + y + "," + z + ")"));
+                    return;
                 }
-                chunk.placeBlock(x, y, z, blockType.getId(), rotation, Rotation.None, Rotation.None, 0);
 
                 JsonObject json = new JsonObject();
                 json.addProperty("x", x);

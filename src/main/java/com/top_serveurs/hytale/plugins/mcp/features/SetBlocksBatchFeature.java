@@ -8,6 +8,7 @@ import com.hypixel.hytale.logger.HytaleLogger;
 import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.Rotation;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.RotationTuple;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
@@ -182,14 +183,25 @@ public class SetBlocksBatchFeature implements McpFeature {
                             results.add(result);
                             continue;
                         }
-                        // Overwriting an already-solid block in place can silently fail to persist
-                        // (confirmed for both rotation-only and full blockType changes) - break it
-                        // to air first whenever the target isn't already air.
-                        BlockType existing = chunk.getBlockType(x, y, z);
-                        if (existing != null && existing != BlockType.EMPTY) {
-                            chunk.breakBlock(x, y, z, 0);
+                        // The 8-arg placeBlock convenience overload always runs with an internal
+                        // test=true occupancy check, which rejects placement over any already-solid
+                        // block and silently no-ops - previously worked around with a break-first.
+                        // The 7-arg overload's test=false skips that check and writes straight
+                        // through for both air and occupied targets in one call.
+                        RotationTuple rotationTuple = RotationTuple.of(rotation, Rotation.None, Rotation.None);
+                        boolean placed = chunk.placeBlock(x, y, z, blockType.getId(), rotationTuple, 0, false);
+
+                        if (!placed) {
+                            failureCount++;
+                            JsonObject result = new JsonObject();
+                            result.addProperty("x", x);
+                            result.addProperty("y", y);
+                            result.addProperty("z", z);
+                            result.addProperty("status", "error");
+                            result.addProperty("message", "placeBlock rejected the placement");
+                            results.add(result);
+                            continue;
                         }
-                        chunk.placeBlock(x, y, z, blockType.getId(), rotation, Rotation.None, Rotation.None, 0);
                         successCount++;
 
                         JsonObject result = new JsonObject();
