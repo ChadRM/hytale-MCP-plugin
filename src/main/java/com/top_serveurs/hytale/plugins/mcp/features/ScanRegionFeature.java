@@ -4,9 +4,12 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.hypixel.hytale.logger.HytaleLogger;
+import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
+import com.hypixel.hytale.server.core.asset.type.fluid.Fluid;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.top_serveurs.hytale.plugins.mcp.auth.McpAuthManager;
 import com.top_serveurs.hytale.plugins.mcp.auth.McpAuthManager.AuthLevel;
 import com.top_serveurs.hytale.plugins.mcp.config.McpConfig;
@@ -23,6 +26,10 @@ import java.util.concurrent.CompletableFuture;
  * positions. Only non-air blocks are included in the returned list - returning every air block in
  * a large box would blow up payload size for little value, since the caller almost always wants
  * "what's actually built here", not a full lattice.
+ *
+ * <p>Also reports fluid (water/lava) presence separately from block type - this engine tracks
+ * fluids on their own per-chunk data channel ({@code WorldChunk.getFluidId}/{@code getFluidLevel}),
+ * so a position can be full of water while {@code getBlockType} still reports plain air there.
  *
  * <p>Volume is capped by {@code maxScanVolume} (mirrors set_blocks_batch's maxBlocksBatch cap) to
  * bound both response size and worst-case blocking time: each position not yet resolved triggers
@@ -50,7 +57,7 @@ public class ScanRegionFeature implements McpFeature {
     public McpTool getToolDefinition() {
         return new McpTool(
                 "scan_region",
-                "Scans a bounding box (any two opposite corners) and reports every non-air block found, plus counts of air/unloaded positions. Max volume "
+                "Scans a bounding box (any two opposite corners) and reports every non-air block found plus every position with fluid (water/lava - tracked separately from block type, so a position can be fluid-filled while reading as air), plus counts of air/unloaded positions. Max volume "
                         + config.getFeatures().getMaxScanVolume() + " blocks. Use this instead of repeated get_block calls to check whether a structure is actually built as expected.",
                 "function"
         );
@@ -122,16 +129,33 @@ public class ScanRegionFeature implements McpFeature {
         world.execute(() -> {
             try {
                 JsonArray blocks = new JsonArray();
+                JsonArray fluids = new JsonArray();
                 int airCount = 0;
                 int unloadedCount = 0;
 
                 for (int x = minX; x <= maxX; x++) {
-                    for (int y = minY; y <= maxY; y++) {
-                        for (int z = minZ; z <= maxZ; z++) {
+                    for (int z = minZ; z <= maxZ; z++) {
+                        WorldChunk chunk = world.getChunk(ChunkUtil.indexChunkFromBlock(x, z));
+                        for (int y = minY; y <= maxY; y++) {
                             BlockType blockType = world.getBlockType(x, y, z);
-                            if (blockType == null) {
+                            if (blockType == null || chunk == null) {
                                 unloadedCount++;
-                            } else if (blockType == BlockType.EMPTY) {
+                                continue;
+                            }
+
+                            int fluidId = chunk.getFluidId(x, y, z);
+                            if (fluidId != Fluid.EMPTY_ID) {
+                                JsonObject fluidBlock = new JsonObject();
+                                fluidBlock.addProperty("x", x);
+                                fluidBlock.addProperty("y", y);
+                                fluidBlock.addProperty("z", z);
+                                Fluid fluid = Fluid.getAssetMap().getAsset(fluidId);
+                                fluidBlock.addProperty("fluidType", fluid != null ? fluid.getId() : null);
+                                fluidBlock.addProperty("fluidLevel", chunk.getFluidLevel(x, y, z));
+                                fluids.add(fluidBlock);
+                            }
+
+                            if (blockType == BlockType.EMPTY) {
                                 airCount++;
                             } else {
                                 JsonObject block = new JsonObject();
@@ -148,12 +172,14 @@ public class ScanRegionFeature implements McpFeature {
                 JsonObject response = new JsonObject();
                 response.addProperty("volume", volume);
                 response.addProperty("nonAirCount", blocks.size());
+                response.addProperty("fluidCount", fluids.size());
                 response.addProperty("airCount", airCount);
                 response.addProperty("unloadedCount", unloadedCount);
                 response.add("blocks", blocks);
+                response.add("fluids", fluids);
 
                 logger.atInfo().log("[SCAN_REGION] Scanned " + volume + " positions ("
-                        + blocks.size() + " non-air, " + airCount + " air, " + unloadedCount + " unloaded)");
+                        + blocks.size() + " non-air, " + fluids.size() + " fluid, " + airCount + " air, " + unloadedCount + " unloaded)");
 
                 future.complete(McpToolResponse.success(GSON.toJson(response)));
 

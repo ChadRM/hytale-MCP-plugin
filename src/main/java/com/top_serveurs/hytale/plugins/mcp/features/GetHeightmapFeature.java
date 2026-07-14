@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.hypixel.hytale.logger.HytaleLogger;
 import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
+import com.hypixel.hytale.server.core.asset.type.fluid.Fluid;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
@@ -26,12 +27,41 @@ import java.util.concurrent.CompletableFuture;
  *
  * <p>Uses {@code WorldChunk.getHeight(localX, localZ)} - the engine's own maintained heightmap - for
  * an O(1) lookup per column instead of scanning blocks top-down. {@code World} doesn't expose this
- * directly; it's reached via {@code getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z))} then
+ * directly; it's reached via {@code getChunk(ChunkUtil.indexChunkFromBlock(x, z))} then
  * {@code chunk.getHeight(x & ChunkUtil.SIZE_MASK, z & ChunkUtil.SIZE_MASK)}.
+ *
+ * <p>Deliberately calls {@code World.getChunk(long)}, not {@code getChunkIfLoaded(long)} - the
+ * latter returns {@code null} for an unloaded chunk instead of loading it, which made this tool
+ * silently fail (report every column as unloaded) whenever no player was nearby to keep chunks
+ * loaded, even though {@code get_block}/{@code scan_region} worked fine in the same situation.
+ * Confirmed via decompiling {@code IChunkAccessorSync.getBlock} (which {@code getBlockType} calls
+ * internally) that it forces a load through this exact same {@code getChunk(long)} default method -
+ * {@code getChunkIfLoaded} was just the wrong call for a tool that's supposed to work regardless of
+ * player proximity. {@code getChunk} blocks synchronously (safe from the world thread specifically -
+ * it pumps the world's own task queue while waiting rather than deadlocking) until the chunk loads,
+ * so worst-case latency scales with how many distinct, currently-unloaded chunks a call touches;
+ * {@code maxHeightmapSamples} already bounds that.
+ *
+ * <p>The engine's own heightmap reports the literal topmost block, which is overhanging tree canopy
+ * ({@code Plant_Leaves_*}) more often than not near vegetation - by default this walks down past
+ * canopy block types to report the block a builder would actually stand on, keeping the raw canopy
+ * top too so callers can tell it happened. {@link #FOLIAGE_ID_SUBSTRING} is a hardcoded guess at
+ * every leaf-type id in the current pack; re-derive it (grep the live asset registry / {@code
+ * list_blocks} for {@code Leaves}) against {@code get_server_info}'s {@code hytaleVersion} whenever
+ * that version changes, since new tree species could ship under a different naming scheme.
+ *
+ * <p>Also reports the water surface (if any) above each column's ground: fluids live on a separate
+ * per-chunk data channel from block type in this engine ({@code WorldChunk.getFluidId}/{@code
+ * getFluidLevel}), so a lake bed can be all `chunk.getHeight` ever reports, with the actual water
+ * surface floating invisibly above it as far as block-type-only tools are concerned. Confirmed live:
+ * a player standing in visibly 2-block-deep water had every block-type-based tool report plain air.
  */
 public class GetHeightmapFeature implements McpFeature {
 
     private static final Gson GSON = new Gson();
+    private static final String FOLIAGE_ID_SUBSTRING = "_Leaves_";
+    private static final int MAX_FOLIAGE_SKIP_DEPTH = 24;
+    private static final int MAX_FLUID_SCAN_HEIGHT = 16;
     private final HytaleLogger logger;
     private final McpConfig config;
 
@@ -49,7 +79,7 @@ public class GetHeightmapFeature implements McpFeature {
     public McpTool getToolDefinition() {
         return new McpTool(
                 "get_heightmap",
-                "Gets the ground surface height and top block type for every column in an X/Z area - a compact terrain-shape query for roads/rivers/siting, much lighter than scan_region for the same area. Max "
+                "Gets the ground surface height and top block type for every column in an X/Z area, plus the water surface height/type above it if any (fluids are tracked separately from block type, so they'd otherwise be invisible) - a compact terrain-shape query for roads/rivers/siting, much lighter than scan_region for the same area. Max "
                         + config.getFeatures().getMaxHeightmapSamples() + " sampled columns; use the stride parameter for a coarse scan over a large area.",
                 "function"
         );
@@ -64,7 +94,8 @@ public class GetHeightmapFeature implements McpFeature {
                 "x2", McpToolSchema.integerProperty("Opposite corner X coordinate"),
                 "z2", McpToolSchema.integerProperty("Opposite corner Z coordinate"),
                 "stride", McpToolSchema.integerProperty("Sample every Nth block per axis (optional, default 1 - use a larger stride for a coarse scan over a large area)"),
-                "world", McpToolSchema.stringProperty("World UUID")
+                "world", McpToolSchema.stringProperty("World UUID"),
+                "skipFoliage", McpToolSchema.booleanProperty("Walk down past overhanging tree canopy to report the actual ground surface instead of the literal topmost block (optional, default true)")
             ),
             java.util.List.of("x1", "z1", "x2", "z2", "world")
         );
@@ -80,6 +111,8 @@ public class GetHeightmapFeature implements McpFeature {
         Integer strideArg = getArgumentAsInteger(call, "stride");
         int stride = (strideArg == null || strideArg < 1) ? 1 : strideArg;
         String worldUuidStr = getArgumentAsString(call, "world");
+        Boolean skipFoliageArg = getArgumentAsBoolean(call, "skipFoliage");
+        boolean skipFoliage = skipFoliageArg == null || skipFoliageArg;
 
         if (x1 == Integer.MIN_VALUE || z1 == Integer.MIN_VALUE || x2 == Integer.MIN_VALUE || z2 == Integer.MIN_VALUE) {
             return McpToolResponse.error("x1, z1, x2 and z2 are required integers");
@@ -127,7 +160,7 @@ public class GetHeightmapFeature implements McpFeature {
                         column.addProperty("x", x);
                         column.addProperty("z", z);
 
-                        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
+                        WorldChunk chunk = world.getChunk(ChunkUtil.indexChunkFromBlock(x, z));
                         if (chunk == null) {
                             column.addProperty("loaded", false);
                             unloadedCount++;
@@ -137,16 +170,47 @@ public class GetHeightmapFeature implements McpFeature {
 
                         int localX = x & ChunkUtil.SIZE_MASK;
                         int localZ = z & ChunkUtil.SIZE_MASK;
-                        short surfaceY = chunk.getHeight(localX, localZ);
+                        short canopyTopY = chunk.getHeight(localX, localZ);
 
                         column.addProperty("loaded", true);
-                        column.addProperty("surfaceY", surfaceY);
 
-                        BlockType surfaceType = world.getBlockType(x, surfaceY, z);
-                        if (surfaceType != null && surfaceType != BlockType.EMPTY) {
-                            column.addProperty("blockType", surfaceType.getId());
+                        int groundY = canopyTopY;
+                        BlockType groundType = world.getBlockType(x, groundY, z);
+                        int skipped = 0;
+                        if (skipFoliage) {
+                            while (isFoliageCanopy(groundType) && skipped < MAX_FOLIAGE_SKIP_DEPTH) {
+                                groundY--;
+                                groundType = world.getBlockType(x, groundY, z);
+                                skipped++;
+                            }
+                        }
+
+                        column.addProperty("surfaceY", groundY);
+                        if (groundType != null && groundType != BlockType.EMPTY) {
+                            column.addProperty("blockType", groundType.getId());
                         } else {
                             column.add("blockType", null);
+                        }
+
+                        if (skipped > 0) {
+                            column.addProperty("canopyTopY", (int) canopyTopY);
+                            BlockType canopyType = world.getBlockType(x, canopyTopY, z);
+                            column.addProperty("canopyBlockType", canopyType != null ? canopyType.getId() : null);
+                        }
+
+                        Integer waterSurfaceY = null;
+                        String fluidType = null;
+                        for (int fy = groundY + 1; fy <= groundY + MAX_FLUID_SCAN_HEIGHT; fy++) {
+                            int fluidId = chunk.getFluidId(x, fy, z);
+                            if (fluidId != Fluid.EMPTY_ID) {
+                                waterSurfaceY = fy;
+                                Fluid fluid = Fluid.getAssetMap().getAsset(fluidId);
+                                fluidType = fluid != null ? fluid.getId() : null;
+                            }
+                        }
+                        if (waterSurfaceY != null) {
+                            column.addProperty("waterSurfaceY", waterSurfaceY);
+                            column.addProperty("fluidType", fluidType);
                         }
 
                         columns.add(column);
@@ -191,6 +255,21 @@ public class GetHeightmapFeature implements McpFeature {
         } catch (Exception e) {
             return Integer.MIN_VALUE;
         }
+    }
+
+    private boolean isFoliageCanopy(BlockType type) {
+        if (type == null || type == BlockType.EMPTY) {
+            return false;
+        }
+        String id = type.getId();
+        return id != null && id.contains(FOLIAGE_ID_SUBSTRING);
+    }
+
+    private Boolean getArgumentAsBoolean(McpToolCall call, String key) {
+        Object value = call.getArguments().get(key);
+        if (value == null) return null;
+        if (value instanceof Boolean) return (Boolean) value;
+        return Boolean.parseBoolean(value.toString());
     }
 
     private Integer getArgumentAsInteger(McpToolCall call, String key) {

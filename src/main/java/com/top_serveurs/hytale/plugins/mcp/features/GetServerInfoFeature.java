@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.hypixel.hytale.logger.HytaleLogger;
 import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.common.plugin.PluginIdentifier;
+import com.hypixel.hytale.common.util.java.ManifestUtil;
 import com.top_serveurs.hytale.plugins.mcp.auth.McpAuthManager;
 import com.top_serveurs.hytale.plugins.mcp.config.McpConfig;
 import com.top_serveurs.hytale.plugins.mcp.models.McpTool;
@@ -46,6 +47,9 @@ public class GetServerInfoFeature implements McpFeature {
             JsonObject response = new JsonObject();
             response.addProperty("name", pluginId.getName());
             response.addProperty("version", "1.0.0");
+            response.addProperty("hytaleVersion", ManifestUtil.getImplementationVersion());
+            response.addProperty("hytalePatchline", ManifestUtil.getPatchline());
+            response.addProperty("hytaleRevision", ManifestUtil.getImplementationRevisionId());
             response.addProperty("uptime", getUptime());
             response.addProperty("tps", getTps());
 

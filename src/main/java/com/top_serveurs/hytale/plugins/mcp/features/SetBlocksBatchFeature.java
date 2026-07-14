@@ -5,9 +5,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.hypixel.hytale.logger.HytaleLogger;
+import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.Rotation;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.top_serveurs.hytale.plugins.mcp.auth.McpAuthManager;
 import com.top_serveurs.hytale.plugins.mcp.auth.McpAuthManager.AuthLevel;
 import com.top_serveurs.hytale.plugins.mcp.config.McpConfig;
@@ -51,7 +54,8 @@ public class SetBlocksBatchFeature implements McpFeature {
                 "x", McpToolSchema.integerProperty("X coordinate"),
                 "y", McpToolSchema.integerProperty("Y coordinate"),
                 "z", McpToolSchema.integerProperty("Z coordinate"),
-                "blockType", McpToolSchema.stringProperty("Block type identifier")
+                "blockType", McpToolSchema.stringProperty("Block type identifier"),
+                "rotation", McpToolSchema.stringProperty("Optional yaw rotation for directional blocks: None, Ninety, OneEighty, or TwoSeventy. Defaults to None.")
             ),
             java.util.List.of("x", "y", "z", "blockType"),
             "Block placement description"
@@ -134,6 +138,8 @@ public class SetBlocksBatchFeature implements McpFeature {
                     int y = blockData.get("y").getAsInt();
                     int z = blockData.get("z").getAsInt();
                     String blockTypeStr = blockData.get("blockType").getAsString();
+                    String rotationStr = blockData.has("rotation") && !blockData.get("rotation").isJsonNull()
+                            ? blockData.get("rotation").getAsString() : null;
 
                     BlockType blockType = BlockType.getAssetMap().getAsset(blockTypeStr);
                     if (blockType == null || blockType == BlockType.EMPTY) {
@@ -148,8 +154,42 @@ public class SetBlocksBatchFeature implements McpFeature {
                         continue;
                     }
 
+                    Rotation rotation = SetBlockFeature.parseRotation(rotationStr);
+                    if (rotation == null) {
+                        failureCount++;
+                        JsonObject result = new JsonObject();
+                        result.addProperty("x", x);
+                        result.addProperty("y", y);
+                        result.addProperty("z", z);
+                        result.addProperty("status", "error");
+                        result.addProperty("message", "Invalid rotation: " + rotationStr);
+                        results.add(result);
+                        continue;
+                    }
+
                     try {
-                        world.setBlock(x, y, z, blockType.getId(), 0);
+                        // See SetBlockFeature: world.setBlock always hardcodes rotation to None;
+                        // placeBlock on the chunk's BlockAccessor is the only way to set facing.
+                        WorldChunk chunk = world.getChunk(ChunkUtil.indexChunkFromBlock(x, z));
+                        if (chunk == null) {
+                            failureCount++;
+                            JsonObject result = new JsonObject();
+                            result.addProperty("x", x);
+                            result.addProperty("y", y);
+                            result.addProperty("z", z);
+                            result.addProperty("status", "error");
+                            result.addProperty("message", "Chunk not loaded");
+                            results.add(result);
+                            continue;
+                        }
+                        // Overwriting an already-solid block in place can silently fail to persist
+                        // (confirmed for both rotation-only and full blockType changes) - break it
+                        // to air first whenever the target isn't already air.
+                        BlockType existing = chunk.getBlockType(x, y, z);
+                        if (existing != null && existing != BlockType.EMPTY) {
+                            chunk.breakBlock(x, y, z, 0);
+                        }
+                        chunk.placeBlock(x, y, z, blockType.getId(), rotation, Rotation.None, Rotation.None, 0);
                         successCount++;
 
                         JsonObject result = new JsonObject();
@@ -157,6 +197,7 @@ public class SetBlocksBatchFeature implements McpFeature {
                         result.addProperty("y", y);
                         result.addProperty("z", z);
                         result.addProperty("blockType", blockTypeStr);
+                        result.addProperty("rotation", rotation.name());
                         result.addProperty("status", "success");
                         results.add(result);
                     } catch (Exception e) {

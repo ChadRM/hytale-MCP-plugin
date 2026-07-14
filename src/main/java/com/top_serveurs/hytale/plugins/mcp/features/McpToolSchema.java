@@ -54,6 +54,13 @@ public final class McpToolSchema {
         return schema;
     }
 
+    public static JsonObject booleanProperty(String description) {
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "boolean");
+        addDescription(schema, description);
+        return schema;
+    }
+
     public static JsonObject arrayProperty(JsonObject items, String description) {
         JsonObject schema = new JsonObject();
         schema.addProperty("type", "array");
