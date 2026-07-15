@@ -104,6 +104,8 @@ public class McpPlugin extends JavaPlugin {
         featureRegistry.registerFeature(new GenerateRoadCorridorFeature(logger, config));
         featureRegistry.registerFeature(new ListNpcRolesFeature(logger, config));
         featureRegistry.registerFeature(new SpawnNpcFeature(logger, config));
+        featureRegistry.registerFeature(new DespawnNpcFeature(logger, config));
+        featureRegistry.registerFeature(new SetNpcPathFeature(logger, config));
 
         logger.atInfo().log("Registered " + featureRegistry.toString() + " features");
     }
