@@ -204,6 +204,8 @@ public class McpConfig {
         private boolean addWaypoint = false;
         private boolean removeWaypoint = false;
         private boolean listWaypoints = false;
+        private boolean listNpcRoles = false;
+        private boolean spawnNpc = false;
 
         public boolean canListPlayers() {
             return listPlayers;
@@ -347,6 +349,22 @@ public class McpConfig {
 
         public void setListWaypoints(boolean listWaypoints) {
             this.listWaypoints = listWaypoints;
+        }
+
+        public boolean canListNpcRoles() {
+            return listNpcRoles;
+        }
+
+        public void setListNpcRoles(boolean listNpcRoles) {
+            this.listNpcRoles = listNpcRoles;
+        }
+
+        public boolean canSpawnNpc() {
+            return spawnNpc;
+        }
+
+        public void setSpawnNpc(boolean spawnNpc) {
+            this.spawnNpc = spawnNpc;
         }
     }
 }
