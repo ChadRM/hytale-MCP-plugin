@@ -97,6 +97,11 @@ public class McpPlugin extends JavaPlugin {
         featureRegistry.registerFeature(new GetServerInfoFeature(logger, config, getIdentifier()));
         featureRegistry.registerFeature(new SendChatMessageFeature(logger));
         featureRegistry.registerFeature(new GetLogsFeature(logger));
+        featureRegistry.registerFeature(new AddWaypointFeature(logger));
+        featureRegistry.registerFeature(new RemoveWaypointFeature(logger));
+        featureRegistry.registerFeature(new ListWaypointsFeature(logger));
+        featureRegistry.registerFeature(new VerifyPlacementFeature(logger, config));
+        featureRegistry.registerFeature(new GenerateRoadCorridorFeature(logger, config));
 
         logger.atInfo().log("Registered " + featureRegistry.toString() + " features");
     }

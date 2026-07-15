@@ -201,6 +201,9 @@ public class McpConfig {
         private boolean breakBlock = false;
         private boolean scanRegion = false;
         private boolean getHeightmap = false;
+        private boolean addWaypoint = false;
+        private boolean removeWaypoint = false;
+        private boolean listWaypoints = false;
 
         public boolean canListPlayers() {
             return listPlayers;
@@ -320,6 +323,30 @@ public class McpConfig {
 
         public void setGetHeightmap(boolean getHeightmap) {
             this.getHeightmap = getHeightmap;
+        }
+
+        public boolean canAddWaypoint() {
+            return addWaypoint;
+        }
+
+        public void setAddWaypoint(boolean addWaypoint) {
+            this.addWaypoint = addWaypoint;
+        }
+
+        public boolean canRemoveWaypoint() {
+            return removeWaypoint;
+        }
+
+        public void setRemoveWaypoint(boolean removeWaypoint) {
+            this.removeWaypoint = removeWaypoint;
+        }
+
+        public boolean canListWaypoints() {
+            return listWaypoints;
+        }
+
+        public void setListWaypoints(boolean listWaypoints) {
+            this.listWaypoints = listWaypoints;
         }
     }
 }
