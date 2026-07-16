@@ -1,14 +1,12 @@
 package com.top_serveurs.hytale.plugins.mcp.features;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.hypixel.hytale.component.ArchetypeChunk;
 import com.hypixel.hytale.component.CommandBuffer;
-import com.hypixel.hytale.component.RemoveReason;
-import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.logger.HytaleLogger;
+import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
@@ -23,41 +21,39 @@ import com.top_serveurs.hytale.plugins.mcp.models.McpToolCall;
 import com.top_serveurs.hytale.plugins.mcp.models.McpToolResponse;
 import org.joml.Vector3d;
 
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Removes NPC entities near a position (either explicit x/y/z or near a named player). Finds
- * candidates by scanning every entity carrying an NPCEntity component and comparing live Transform
- * position against the search center - there's no per-NPC handle returned by spawn_npc to target
- * directly (yet), so "nearest within radius" is the practical way to despawn something just placed.
- * Removes only the single nearest match by default; set all:true to clear everything in radius.
+ * Reads the live position/rotation of the NPC nearest a search position (either an explicit x/y/z
+ * or near a named player). Same "nearest within radius" search as despawn_npc/set_npc_path - there's
+ * no per-NPC handle returned by spawn_npc to target directly (yet). Read-only, no world mutation:
+ * lets a caller poll an NPC's position over time to verify movement/behavior without needing someone
+ * watching in-game.
  */
-public class DespawnNpcFeature implements McpFeature {
+public class GetNpcPositionFeature implements McpFeature {
 
     private static final Gson GSON = new Gson();
     private static final double DEFAULT_RADIUS = 10.0;
     private final HytaleLogger logger;
 
-    public DespawnNpcFeature(HytaleLogger logger, McpConfig config) {
+    public GetNpcPositionFeature(HytaleLogger logger, McpConfig config) {
         this.logger = logger;
     }
 
     @Override
     public String getName() {
-        return "despawn_npc";
+        return "get_npc_position";
     }
 
     @Override
     public McpTool getToolDefinition() {
         return new McpTool(
-                "despawn_npc",
-                "Removes NPC entities near a position. Either give an explicit x/y/z, or give player "
-                        + "to search near that player. Removes only the single nearest NPC within radius "
-                        + "(default " + DEFAULT_RADIUS + ") by default; set all:true to remove every NPC in radius.",
+                "get_npc_position",
+                "Gets the live position, rotation, and role of the NPC nearest a search position - either "
+                        + "an explicit x/y/z or near a named player. Poll this repeatedly to verify an NPC is "
+                        + "actually moving/behaving as expected without needing to watch in-game.",
                 "function"
         );
     }
@@ -71,9 +67,7 @@ public class DespawnNpcFeature implements McpFeature {
                 "x", McpToolSchema.stringProperty("Explicit X coordinate to search near. Required together with y/z if player is omitted."),
                 "y", McpToolSchema.stringProperty("Explicit Y coordinate."),
                 "z", McpToolSchema.stringProperty("Explicit Z coordinate."),
-                "radius", McpToolSchema.stringProperty("Search radius in blocks. Defaults to " + DEFAULT_RADIUS + "."),
-                "all", McpToolSchema.booleanProperty("If true, remove every NPC within radius instead of just the nearest one. Defaults to false."),
-                "npcTypeId", McpToolSchema.stringProperty("If set, only remove NPCs whose role/type id matches this exactly (case-insensitive) - use to avoid sweeping up unrelated wildlife when clearing test NPCs of a specific role.")
+                "radius", McpToolSchema.stringProperty("Search radius in blocks. Defaults to " + DEFAULT_RADIUS + ".")
             ),
             java.util.List.of("world")
         );
@@ -87,8 +81,6 @@ public class DespawnNpcFeature implements McpFeature {
         Double explicitY = getArgumentAsDouble(call, "y");
         Double explicitZ = getArgumentAsDouble(call, "z");
         double radius = getArgumentAsDoubleOrDefault(call, "radius", DEFAULT_RADIUS);
-        boolean all = getArgumentAsBoolean(call, "all");
-        String npcTypeIdFilter = getArgumentAsString(call, "npcTypeId");
 
         if (worldUuidStr == null) {
             return McpToolResponse.error("world UUID is required");
@@ -115,89 +107,68 @@ public class DespawnNpcFeature implements McpFeature {
 
         world.execute(() -> {
             try {
-                Vector3d center;
+                Vector3d searchCenter;
 
                 if (hasExplicitPosition) {
-                    center = new Vector3d(explicitX, explicitY, explicitZ);
+                    searchCenter = new Vector3d(explicitX, explicitY, explicitZ);
                 } else {
                     PlayerRef player = findPlayer(playerIdentifier);
                     if (player == null) {
                         future.complete(McpToolResponse.error("Player not found: " + playerIdentifier));
                         return;
                     }
-                    center = player.getTransform().getPosition();
+                    searchCenter = player.getTransform().getPosition();
                 }
 
                 Store<EntityStore> store = world.getEntityStore().getStore();
-                Vector3d searchCenter = center;
+                Vector3d finalSearchCenter = searchCenter;
 
-                List<Candidate> candidates = new ArrayList<>();
+                TransformComponent[] nearestTransformHolder = new TransformComponent[1];
+                String[] nearestTypeIdHolder = new String[1];
+                double[] nearestDistanceHolder = { Double.MAX_VALUE };
+
                 store.forEachChunk(NPCEntity.getComponentType(), (ArchetypeChunk<EntityStore> chunk, CommandBuffer<EntityStore> cmdBuffer) -> {
                     for (int i = 0; i < chunk.size(); i++) {
                         TransformComponent transform = chunk.getComponent(i, TransformComponent.getComponentType());
                         if (transform == null) continue;
-                        Vector3d pos = transform.getPosition();
-                        double distance = pos.distance(searchCenter);
-                        if (distance <= radius) {
+                        double distance = transform.getPosition().distance(finalSearchCenter);
+                        if (distance <= radius && distance < nearestDistanceHolder[0]) {
                             NPCEntity npc = chunk.getComponent(i, NPCEntity.getComponentType());
-                            String npcTypeId = npc != null ? npc.getNPCTypeId() : "unknown";
-                            if (npcTypeIdFilter != null && !npcTypeIdFilter.equalsIgnoreCase(npcTypeId)) continue;
-                            candidates.add(new Candidate(chunk.getReferenceTo(i), npcTypeId, pos, distance));
+                            nearestTransformHolder[0] = transform;
+                            nearestTypeIdHolder[0] = npc != null ? npc.getNPCTypeId() : "unknown";
+                            nearestDistanceHolder[0] = distance;
                         }
                     }
                 });
 
-                candidates.sort((a, b) -> Double.compare(a.distance, b.distance));
-
-                List<Candidate> toRemove = all
-                        ? candidates
-                        : (candidates.isEmpty() ? candidates : candidates.subList(0, 1));
-
-                JsonArray removedArray = new JsonArray();
-                for (Candidate c : toRemove) {
-                    store.removeEntity(c.ref, RemoveReason.REMOVE);
-
-                    JsonObject entry = new JsonObject();
-                    entry.addProperty("npcTypeId", c.npcTypeId);
-                    entry.addProperty("distance", c.distance);
-                    JsonObject posJson = new JsonObject();
-                    posJson.addProperty("x", c.position.x());
-                    posJson.addProperty("y", c.position.y());
-                    posJson.addProperty("z", c.position.z());
-                    entry.add("position", posJson);
-                    removedArray.add(entry);
+                if (nearestTransformHolder[0] == null) {
+                    future.complete(McpToolResponse.error("No NPC found within " + radius + " blocks of the search position"));
+                    return;
                 }
 
-                JsonObject response = new JsonObject();
-                response.addProperty("candidatesFound", candidates.size());
-                response.addProperty("removedCount", toRemove.size());
-                response.add("removed", removedArray);
+                Vector3d pos = nearestTransformHolder[0].getPosition();
+                Rotation3f rotation = nearestTransformHolder[0].getRotation();
 
-                logger.atInfo().log("[DESPAWN_NPC] Removed " + toRemove.size() + " of " + candidates.size()
-                        + " candidates within " + radius + " blocks");
+                JsonObject position = new JsonObject();
+                position.addProperty("x", pos.x());
+                position.addProperty("y", pos.y());
+                position.addProperty("z", pos.z());
+                position.addProperty("yaw", rotation.yaw());
+                position.addProperty("pitch", rotation.pitch());
+
+                JsonObject response = new JsonObject();
+                response.addProperty("npcTypeId", nearestTypeIdHolder[0]);
+                response.addProperty("distanceFromSearchCenter", nearestDistanceHolder[0]);
+                response.add("position", position);
 
                 future.complete(McpToolResponse.success(GSON.toJson(response)));
             } catch (Throwable t) {
-                logger.atSevere().withCause(t).log("[DESPAWN_NPC] Exception");
-                future.complete(McpToolResponse.error("Failed to despawn NPC: " + t.getMessage()));
+                logger.atSevere().withCause(t).log("[GET_NPC_POSITION] Exception");
+                future.complete(McpToolResponse.error("Failed to get NPC position: " + t.getMessage()));
             }
         });
 
         return future.join();
-    }
-
-    private static final class Candidate {
-        final Ref<EntityStore> ref;
-        final String npcTypeId;
-        final Vector3d position;
-        final double distance;
-
-        Candidate(Ref<EntityStore> ref, String npcTypeId, Vector3d position, double distance) {
-            this.ref = ref;
-            this.npcTypeId = npcTypeId;
-            this.position = position;
-            this.distance = distance;
-        }
     }
 
     private PlayerRef findPlayer(String identifier) {
@@ -225,10 +196,10 @@ public class DespawnNpcFeature implements McpFeature {
     @Override
     public boolean hasPermission(McpAuthManager.AuthLevel authLevel, McpConfig config) {
         if (authLevel == McpAuthManager.AuthLevel.ADMIN) {
-            return config.getFeatures().getAdmins().canSpawnNpc();
+            return config.getFeatures().getAdmins().canGetNpcPosition();
         }
         if (authLevel == McpAuthManager.AuthLevel.PLAYER) {
-            return config.getFeatures().getPlayers().canSpawnNpc();
+            return config.getFeatures().getPlayers().canGetNpcPosition();
         }
         return false;
     }
@@ -251,12 +222,5 @@ public class DespawnNpcFeature implements McpFeature {
     private double getArgumentAsDoubleOrDefault(McpToolCall call, String key, double defaultValue) {
         Double value = getArgumentAsDouble(call, key);
         return value != null ? value : defaultValue;
-    }
-
-    private boolean getArgumentAsBoolean(McpToolCall call, String key) {
-        Object value = call.getArguments().get(key);
-        if (value == null) return false;
-        if (value instanceof Boolean) return (Boolean) value;
-        return Boolean.parseBoolean(value.toString());
     }
 }
