@@ -108,6 +108,10 @@ public class McpPlugin extends JavaPlugin {
         featureRegistry.registerFeature(new DespawnNpcFeature(logger, config));
         featureRegistry.registerFeature(new SetNpcPathFeature(logger, config));
         featureRegistry.registerFeature(new GetNpcPositionFeature(logger, config));
+        featureRegistry.registerFeature(new SetNpcFlagFeature(logger, config));
+        featureRegistry.registerFeature(new StartNpcTraceFeature(logger, config));
+        featureRegistry.registerFeature(new StopNpcTraceFeature(logger, config));
+        featureRegistry.registerFeature(new ListItemsFeature(logger, config));
 
         logger.atInfo().log("Registered " + featureRegistry.toString() + " features");
     }

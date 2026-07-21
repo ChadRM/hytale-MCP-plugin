@@ -6,13 +6,13 @@ import com.hypixel.hytale.component.ArchetypeChunk;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.logger.HytaleLogger;
-import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.npc.entities.NPCEntity;
+import com.hypixel.hytale.server.npc.role.Role;
 import com.top_serveurs.hytale.plugins.mcp.auth.McpAuthManager;
 import com.top_serveurs.hytale.plugins.mcp.auth.McpAuthManager.AuthLevel;
 import com.top_serveurs.hytale.plugins.mcp.config.McpConfig;
@@ -26,34 +26,40 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Reads the live position/rotation of the NPC nearest a search position (either an explicit x/y/z
- * or near a named player). Same "nearest within radius" search as despawn_npc/set_npc_path - there's
- * no per-NPC handle returned by spawn_npc to target directly (yet). Read-only, no world mutation:
- * lets a caller poll an NPC's position over time to verify movement/behavior without needing someone
- * watching in-game.
+ * Sets one of a Role's named-flag slots directly on the nearest matching NPC (Role.setFlag(int,
+ * boolean), the same runtime state ActionSetFlag/SensorFlag read and write from inside Role JSON).
+ * Flag *names* only exist at Role-build time - each name gets assigned the next free integer slot
+ * on first reference, via a per-Role-asset SlotMapper (confirmed via javap on
+ * BuilderSupport/SlotMapper/ActionSetFlag/Role in HytaleServer.jar) - there's no live name->index
+ * lookup exposed at runtime, so callers pass the raw slot index and must determine which index
+ * corresponds to which flag name empirically (e.g. set index 0, spawn, see which Instruction fires
+ * in logs) for a given Role, rather than by name here.
  */
-public class GetNpcPositionFeature implements McpFeature {
+public class SetNpcFlagFeature implements McpFeature {
 
     private static final Gson GSON = new Gson();
     private static final double DEFAULT_RADIUS = 10.0;
     private final HytaleLogger logger;
 
-    public GetNpcPositionFeature(HytaleLogger logger, McpConfig config) {
+    public SetNpcFlagFeature(HytaleLogger logger, McpConfig config) {
         this.logger = logger;
     }
 
     @Override
     public String getName() {
-        return "get_npc_position";
+        return "set_npc_flag";
     }
 
     @Override
     public McpTool getToolDefinition() {
         return new McpTool(
-                "get_npc_position",
-                "Gets the live position, rotation, and role of the NPC nearest a search position - either "
-                        + "an explicit x/y/z or near a named player. Poll this repeatedly to verify an NPC is "
-                        + "actually moving/behaving as expected without needing to watch in-game.",
+                "set_npc_flag",
+                "Sets a Role flag slot (by integer index, not name - flag names only exist at Role-build "
+                        + "time) to true/false on the NPC nearest a search position. Use to force a Role's "
+                        + "internal state (e.g. a directional Flag/SetFlag pair in a custom Role) without "
+                        + "waiting for the NPC's own AI to reach that state naturally. Index must be "
+                        + "determined empirically for a given Role (deploy, set index 0, observe behavior/"
+                        + "logs, repeat) - there is no name-to-index lookup at runtime.",
                 "function"
         );
     }
@@ -68,9 +74,11 @@ public class GetNpcPositionFeature implements McpFeature {
                 "y", McpToolSchema.stringProperty("Explicit Y coordinate."),
                 "z", McpToolSchema.stringProperty("Explicit Z coordinate."),
                 "radius", McpToolSchema.stringProperty("Search radius in blocks. Defaults to " + DEFAULT_RADIUS + "."),
-                "npcTypeId", McpToolSchema.stringProperty("If set, only consider NPCs whose role/type id matches this exactly (case-insensitive) - use to find a specific NPC without picking up nearby wildlife.")
+                "npcTypeId", McpToolSchema.stringProperty("If set, only consider NPCs whose role/type id matches this exactly (case-insensitive)."),
+                "flagIndex", McpToolSchema.stringProperty("The Role flag slot index to set (integer, 0-based - see tool description)."),
+                "value", McpToolSchema.booleanProperty("The value to set the flag to. Defaults to true.")
             ),
-            java.util.List.of("world")
+            java.util.List.of("world", "flagIndex")
         );
     }
 
@@ -83,9 +91,14 @@ public class GetNpcPositionFeature implements McpFeature {
         Double explicitZ = getArgumentAsDouble(call, "z");
         double radius = getArgumentAsDoubleOrDefault(call, "radius", DEFAULT_RADIUS);
         String npcTypeIdFilter = getArgumentAsString(call, "npcTypeId");
+        Integer flagIndex = getArgumentAsInteger(call, "flagIndex");
+        boolean value = getArgumentAsBooleanOrDefault(call, "value", true);
 
         if (worldUuidStr == null) {
             return McpToolResponse.error("world UUID is required");
+        }
+        if (flagIndex == null) {
+            return McpToolResponse.error("flagIndex is required");
         }
 
         boolean hasExplicitPosition = explicitX != null && explicitY != null && explicitZ != null;
@@ -105,6 +118,7 @@ public class GetNpcPositionFeature implements McpFeature {
             return McpToolResponse.error("World not found: " + worldUuidStr);
         }
 
+        int finalFlagIndex = flagIndex;
         CompletableFuture<McpToolResponse> future = new CompletableFuture<>();
 
         world.execute(() -> {
@@ -125,8 +139,7 @@ public class GetNpcPositionFeature implements McpFeature {
                 Store<EntityStore> store = world.getEntityStore().getStore();
                 Vector3d finalSearchCenter = searchCenter;
 
-                TransformComponent[] nearestTransformHolder = new TransformComponent[1];
-                String[] nearestTypeIdHolder = new String[1];
+                NPCEntity[] nearestHolder = new NPCEntity[1];
                 double[] nearestDistanceHolder = { Double.MAX_VALUE };
 
                 store.forEachChunk(NPCEntity.getComponentType(), (ArchetypeChunk<EntityStore> chunk, CommandBuffer<EntityStore> cmdBuffer) -> {
@@ -136,40 +149,42 @@ public class GetNpcPositionFeature implements McpFeature {
                         double distance = transform.getPosition().distance(finalSearchCenter);
                         if (distance <= radius && distance < nearestDistanceHolder[0]) {
                             NPCEntity npc = chunk.getComponent(i, NPCEntity.getComponentType());
-                            String npcTypeId = npc != null ? npc.getNPCTypeId() : "unknown";
+                            if (npc == null) continue;
+                            String npcTypeId = npc.getNPCTypeId();
                             if (npcTypeIdFilter != null && !npcTypeIdFilter.equalsIgnoreCase(npcTypeId)) continue;
-                            nearestTransformHolder[0] = transform;
-                            nearestTypeIdHolder[0] = npcTypeId;
+                            nearestHolder[0] = npc;
                             nearestDistanceHolder[0] = distance;
                         }
                     }
                 });
 
-                if (nearestTransformHolder[0] == null) {
+                if (nearestHolder[0] == null) {
                     String suffix = npcTypeIdFilter != null ? " matching npcTypeId '" + npcTypeIdFilter + "'" : "";
                     future.complete(McpToolResponse.error("No NPC found within " + radius + " blocks of the search position" + suffix));
                     return;
                 }
 
-                Vector3d pos = nearestTransformHolder[0].getPosition();
-                Rotation3f rotation = nearestTransformHolder[0].getRotation();
+                Role role = nearestHolder[0].getRole();
+                if (role == null) {
+                    future.complete(McpToolResponse.error("Nearest NPC has no active Role"));
+                    return;
+                }
 
-                JsonObject position = new JsonObject();
-                position.addProperty("x", pos.x());
-                position.addProperty("y", pos.y());
-                position.addProperty("z", pos.z());
-                position.addProperty("yaw", rotation.yaw());
-                position.addProperty("pitch", rotation.pitch());
+                role.setFlag(finalFlagIndex, value);
 
                 JsonObject response = new JsonObject();
-                response.addProperty("npcTypeId", nearestTypeIdHolder[0]);
-                response.addProperty("distanceFromSearchCenter", nearestDistanceHolder[0]);
-                response.add("position", position);
+                response.addProperty("npcTypeId", nearestHolder[0].getNPCTypeId());
+                response.addProperty("flagIndex", finalFlagIndex);
+                response.addProperty("value", value);
+                response.addProperty("nowSet", role.isFlagSet(finalFlagIndex));
+
+                logger.atInfo().log("[SET_NPC_FLAG] Set flag " + finalFlagIndex + "=" + value + " on nearest "
+                        + nearestHolder[0].getNPCTypeId());
 
                 future.complete(McpToolResponse.success(GSON.toJson(response)));
             } catch (Throwable t) {
-                logger.atSevere().withCause(t).log("[GET_NPC_POSITION] Exception");
-                future.complete(McpToolResponse.error("Failed to get NPC position: " + t.getMessage()));
+                logger.atSevere().withCause(t).log("[SET_NPC_FLAG] Exception");
+                future.complete(McpToolResponse.error("Failed to set NPC flag: " + t.getMessage()));
             }
         });
 
@@ -201,10 +216,10 @@ public class GetNpcPositionFeature implements McpFeature {
     @Override
     public boolean hasPermission(McpAuthManager.AuthLevel authLevel, McpConfig config) {
         if (authLevel == McpAuthManager.AuthLevel.ADMIN) {
-            return config.getFeatures().getAdmins().canGetNpcPosition();
+            return config.getFeatures().getAdmins().canSpawnNpc();
         }
         if (authLevel == McpAuthManager.AuthLevel.PLAYER) {
-            return config.getFeatures().getPlayers().canGetNpcPosition();
+            return config.getFeatures().getPlayers().canSpawnNpc();
         }
         return false;
     }
@@ -227,5 +242,22 @@ public class GetNpcPositionFeature implements McpFeature {
     private double getArgumentAsDoubleOrDefault(McpToolCall call, String key, double defaultValue) {
         Double value = getArgumentAsDouble(call, key);
         return value != null ? value : defaultValue;
+    }
+
+    private Integer getArgumentAsInteger(McpToolCall call, String key) {
+        Object value = call.getArguments().get(key);
+        if (value == null) return null;
+        try {
+            return (int) Double.parseDouble(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private boolean getArgumentAsBooleanOrDefault(McpToolCall call, String key, boolean defaultValue) {
+        Object value = call.getArguments().get(key);
+        if (value == null) return defaultValue;
+        if (value instanceof Boolean) return (Boolean) value;
+        return Boolean.parseBoolean(value.toString());
     }
 }

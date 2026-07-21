@@ -208,6 +208,8 @@ public class McpConfig {
         private boolean spawnNpc = false;
         private boolean listModels = false;
         private boolean getNpcPosition = false;
+        private boolean npcTrace = false;
+        private boolean listItems = false;
 
         public boolean canListPlayers() {
             return listPlayers;
@@ -383,6 +385,22 @@ public class McpConfig {
 
         public void setGetNpcPosition(boolean getNpcPosition) {
             this.getNpcPosition = getNpcPosition;
+        }
+
+        public boolean canNpcTrace() {
+            return npcTrace;
+        }
+
+        public void setNpcTrace(boolean npcTrace) {
+            this.npcTrace = npcTrace;
+        }
+
+        public boolean canListItems() {
+            return listItems;
+        }
+
+        public void setListItems(boolean listItems) {
+            this.listItems = listItems;
         }
     }
 }
