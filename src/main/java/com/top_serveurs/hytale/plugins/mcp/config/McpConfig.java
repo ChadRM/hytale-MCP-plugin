@@ -143,6 +143,7 @@ public class McpConfig {
         private int maxBlocksBatch = 1000;
         private int maxScanVolume = 32768;
         private int maxHeightmapSamples = 10000;
+        private int maxReplaceVolume = 500000;
 
         public FeaturePermissions getPlayers() {
             return players;
@@ -183,6 +184,14 @@ public class McpConfig {
         public void setMaxHeightmapSamples(int maxHeightmapSamples) {
             this.maxHeightmapSamples = maxHeightmapSamples;
         }
+
+        public int getMaxReplaceVolume() {
+            return maxReplaceVolume;
+        }
+
+        public void setMaxReplaceVolume(int maxReplaceVolume) {
+            this.maxReplaceVolume = maxReplaceVolume;
+        }
     }
 
     public static class FeaturePermissions {
@@ -210,6 +219,7 @@ public class McpConfig {
         private boolean getNpcPosition = false;
         private boolean npcTrace = false;
         private boolean listItems = false;
+        private boolean replaceBlocksInRegion = false;
 
         public boolean canListPlayers() {
             return listPlayers;
@@ -401,6 +411,14 @@ public class McpConfig {
 
         public void setListItems(boolean listItems) {
             this.listItems = listItems;
+        }
+
+        public boolean canReplaceBlocksInRegion() {
+            return replaceBlocksInRegion;
+        }
+
+        public void setReplaceBlocksInRegion(boolean replaceBlocksInRegion) {
+            this.replaceBlocksInRegion = replaceBlocksInRegion;
         }
     }
 }
