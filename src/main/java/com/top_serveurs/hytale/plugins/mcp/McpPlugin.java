@@ -113,6 +113,9 @@ public class McpPlugin extends JavaPlugin {
         featureRegistry.registerFeature(new StartNpcTraceFeature(logger, config));
         featureRegistry.registerFeature(new StopNpcTraceFeature(logger, config));
         featureRegistry.registerFeature(new ListItemsFeature(logger, config));
+        featureRegistry.registerFeature(new GenerateSphereFeature(logger, config));
+        featureRegistry.registerFeature(new GenerateCylinderFeature(logger, config));
+        featureRegistry.registerFeature(new GenerateLatticeColumnFeature(logger, config));
 
         logger.atInfo().log("Registered " + featureRegistry.toString() + " features");
     }
