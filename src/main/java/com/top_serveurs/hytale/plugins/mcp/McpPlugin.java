@@ -116,6 +116,7 @@ public class McpPlugin extends JavaPlugin {
         featureRegistry.registerFeature(new GenerateSphereFeature(logger, config));
         featureRegistry.registerFeature(new GenerateCylinderFeature(logger, config));
         featureRegistry.registerFeature(new GenerateLatticeColumnFeature(logger, config));
+        featureRegistry.registerFeature(new GenerateStaircaseFeature(logger, config));
 
         logger.atInfo().log("Registered " + featureRegistry.toString() + " features");
     }
