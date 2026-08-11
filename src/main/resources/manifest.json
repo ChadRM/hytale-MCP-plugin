@@ -1,7 +1,7 @@
 {
   "Group": "Top-Games",
   "Name": "MCP",
-  "Version": "0.2.0",
+  "Version": "0.3.0-SNAPSHOT",
   "Description": "Model Context Protocol (MCP) plugin for Hytale servers - Connect AI assistants like Claude, ChatGPT, Gemini",
   "Authors": [
     {

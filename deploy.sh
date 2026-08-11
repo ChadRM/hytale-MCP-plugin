@@ -8,10 +8,20 @@ set -e
 
 HOST="chad@willikins.cetacean-cloud.ts.net"
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JAR_NAME="MCP-0.2.0.jar"
 
 echo "Building..."
 (cd "$PLUGIN_DIR" && mvn -q -f pom.xml package)
+
+# Derive the jar name from what the build actually produced rather than
+# hardcoding it -- a hardcoded name silently breaks on every version bump,
+# which is exactly what happened going from 0.2.0 to 0.3.0-SNAPSHOT.
+JAR_PATH="$(ls -t "$PLUGIN_DIR"/target/MCP-*.jar 2>/dev/null | grep -v '/original-' | head -1)"
+if [ -z "$JAR_PATH" ]; then
+    echo "No MCP-*.jar found in $PLUGIN_DIR/target after build" >&2
+    exit 1
+fi
+JAR_NAME="$(basename "$JAR_PATH")"
+echo "Built $JAR_NAME"
 
 echo "Backing up previous jar (if any)..."
 ssh "$HOST" "docker exec hytale sh -c 'test -f /home/hytale/server-files/mods/$JAR_NAME && cp /home/hytale/server-files/mods/$JAR_NAME /home/hytale/server-files/mods/$JAR_NAME.bak-\$(date +%Y%m%d-%H%M%S) || true'"
