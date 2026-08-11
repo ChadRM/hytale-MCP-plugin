@@ -7,7 +7,7 @@ Connect AI assistants like OpenCode, Claude, ChatGPT, and Gemini directly to you
 ![Preview](./doc/preview.jpg)
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](https://github.com/ChadRM/hytale-MCP-plugin/releases)
+[![Status](https://img.shields.io/badge/status-work%20in%20progress-yellow.svg)](#installation)
 [![Tools](https://img.shields.io/badge/tools-39-blue.svg)](#api-reference)
 [![Java](https://img.shields.io/badge/java-25-orange.svg)](https://www.oracle.com/java/)
 [![MCP](https://img.shields.io/badge/MCP-Protocol-purple.svg)](https://modelcontextprotocol.io)
@@ -108,9 +108,16 @@ Fixes to upstream tools: `send_chat_message` never actually delivered a message;
 
 ## Installation
 
+> **This fork has no released build.** It is a work in progress, developed against
+> a personal server and still changing shape as tools get added. There is no jar to
+> download here, and the upstream releases page will not have any of this fork's
+> tools. To run it, [build from source](#building-from-source).
+>
+> Treat it as something to read and build, not something to depend on.
+
 ### Quick Start
 
-1. **Download** the latest `MCP-1.*.*.jar` from the [releases page](https://github.com/Metrakit/hytale-MCP-plugin/releases)
+1. **Build** the jar from source — see [Building from Source](#building-from-source)
 2. **Install** the [Nitrado WebServer plugin](https://github.com/nitrado/hytale-plugin-webserver) (required dependency)
 3. **Place** both JAR files in your server's `mods/` directory
 4. **Start** your server to generate the default configuration
@@ -1179,7 +1186,7 @@ We welcome contributions from the community! Here's how you can help:
 
 ### Reporting Issues
 
-- Use the [GitHub issue tracker](https://github.com/Metrakit/hytale-MCP-plugin/issues)
+- Use the [GitHub issue tracker](https://github.com/ChadRM/hytale-MCP-plugin/issues)
 - Check if the issue already exists before creating a new one
 - Include detailed information: server version, plugin version, error logs
 
@@ -1203,7 +1210,7 @@ Copyright (c) 2026 Top-Games
 
 ### Getting Help
 
-- **Issues & Bugs**: [GitHub Issues](https://github.com/Metrakit/hytale-MCP-plugin/issues)
+- **Issues & Bugs**: [GitHub Issues](https://github.com/ChadRM/hytale-MCP-plugin/issues)
 
 ### Useful Links
 
