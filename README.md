@@ -7,9 +7,12 @@ Connect AI assistants like OpenCode, Claude, ChatGPT, and Gemini directly to you
 ![Preview](./doc/preview.jpg)
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](https://github.com/Metrakit/hytale-MCP-plugin/releases)
+[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](https://github.com/ChadRM/hytale-MCP-plugin/releases)
+[![Tools](https://img.shields.io/badge/tools-39-blue.svg)](#api-reference)
 [![Java](https://img.shields.io/badge/java-25-orange.svg)](https://www.oracle.com/java/)
 [![MCP](https://img.shields.io/badge/MCP-Protocol-purple.svg)](https://modelcontextprotocol.io)
+
+Fork of [Metrakit/hytale-MCP-plugin](https://github.com/Metrakit/hytale-MCP-plugin), adding 25 tools — see [This Fork](#this-fork).
 
 Guide: https://top-games.net/guides/connect-ai-hytale-server-mcp
 
