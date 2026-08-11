@@ -21,6 +21,7 @@ Guide: https://top-games.net/guides/connect-ai-hytale-server-mcp
 
 - [About](#about)
 - [Features](#features)
+- [This Fork](#this-fork)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -60,14 +61,43 @@ Whether you're a server administrator, builder, or developer, Hytale MCP provide
 
 ### Built-in Tools
 
-- **World Building** - Construct anything with natural language prompts using batch block placement
-- **Terrain Editing** - Flatten rectangular areas for building foundations
-- **Item Management** - Give items to players with smart item search
-- **Block Discovery** - Search and categorize all available blocks
-- **Player Management** - List players, get positions, manage inventories, send messages
-- **Server Administration** - Execute commands, broadcast messages, kick players
-- **Information Retrieval** - Access server stats, world info, block types, and player data
-- **Log Management** - Filter and retrieve server logs by level, date, and line count
+**39 tools** across eight areas:
+
+| Area | Tools |
+|---|---|
+| **Block read/write** | `set_block` `get_block` `break_block` `set_blocks_batch` `break_blocks_batch` |
+| **Region operations** | `scan_region` `replace_blocks_in_region` `get_heightmap` `verify_placement` `flatten_terrain` |
+| **Shape generators** | `generate_sphere` `generate_cylinder` `generate_staircase` `generate_lattice_column` `generate_road_corridor` |
+| **NPCs** | `spawn_npc` `despawn_npc` `get_npc_position` `set_npc_path` `set_npc_flag` `start_npc_trace` `stop_npc_trace` `list_npc_roles` `list_models` |
+| **Map waypoints** | `add_waypoint` `list_waypoints` `remove_waypoint` |
+| **Players** | `list_players` `get_player_position` `send_chat_message` `broadcast_message` `give_item` |
+| **Discovery** | `list_blocks` `list_items` `get_building_guide` |
+| **Server** | `get_server_info` `get_world_info` `get_logs` `execute_command` |
+
+Key capabilities:
+
+- **Read before write** - Every mutation has a read counterpart, so an agent can inspect world state instead of guessing. Fluids are reported separately from block type, since a water-filled position otherwise reads as plain air.
+- **Bulk operations** - Batch placement, batch breaking, region scanning, and region-wide find-and-replace, each in a single call instead of thousands of round trips.
+- **Plan-then-place geometry** - Shape generators compute a block plan and return it *without touching the world*, so the plan can be inspected, edited, or rejected before being fed to `set_blocks_batch`.
+- **Verification** - `verify_placement` checks a whole expected build against live world state in one call, optionally flagging blocks left floating with no support.
+- **NPC control** - Spawn, despawn, locate, assign patrol paths, toggle role flags, and record fine-grained behavioral traces to disk.
+- **Configurable safety limits** - Batch size and scan/replace volumes are capped by config, with per-tool permissions split between admin and player tokens.
+
+### This Fork
+
+This is a fork of [Metrakit/hytale-MCP-plugin](https://github.com/Metrakit/hytale-MCP-plugin), which established the MCP server, auth model, feature-registry architecture, and the original 14 tools.
+
+This fork adds **25 tools** and fixes several bugs in the originals:
+
+- **World reading** - `get_block`, `scan_region`, `get_heightmap`. The upstream plugin could write blocks but never read them back, so an agent had no way to see what it had actually built, or what terrain it was building on.
+- **Bulk editing** - `break_block`, `break_blocks_batch`, `replace_blocks_in_region`
+- **Shape generators** - sphere, cylinder, staircase, lattice column, road corridor, all pure-geometry
+- **Verification** - `verify_placement`
+- **NPC subsystem** - spawn, despawn, position, pathing, role flags, tracing, plus `list_npc_roles` and `list_models`
+- **Map waypoints** - `add_waypoint`, `list_waypoints`, `remove_waypoint`
+- **Item discovery** - `list_items`. Items are a separate asset registry from Blocks, and `list_blocks` never surfaced them.
+
+Fixes to upstream tools: `send_chat_message` never actually delivered a message; `set_block` could not overwrite an existing block in place, and gained rotation support; `list_players` and `get_player_position` could hang the server.
 
 ## Requirements
 
@@ -652,6 +682,301 @@ Sends a chat message to a specific player.
   "status": "sent"
 }
 ```
+
+---
+
+### Block Read/Write
+
+#### `get_block`
+
+Gets the block type actually placed at world coordinates - the read counterpart to `set_block`. Also reports fluid presence, type, and level, which is tracked separately from block type and would otherwise read as plain air.
+
+**Example Prompt:**
+> "What block is at x:10, y:64, z:10?"
+
+**Parameters:**
+- `x`, `y`, `z` (int, required): Coordinates
+- `world` (string, required): World UUID
+
+#### `break_block`
+
+Clears the block at world coordinates back to air, the same as a player breaking it (drops items, plays break effects).
+
+**Parameters:**
+- `x`, `y`, `z` (int, required): Coordinates
+- `world` (string, required): World UUID
+
+#### `break_blocks_batch`
+
+Clears up to `maxBlocksBatch` blocks (default 1000) back to air in one call - the batch counterpart to `break_block`.
+
+**Example Prompt:**
+> "Clear out the whole room I just scanned"
+
+**Parameters:**
+- `world` (string, required): World UUID
+- `coords` (array, required): List of `{x, y, z}` objects to clear
+
+---
+
+### Region Operations
+
+#### `scan_region`
+
+Scans a bounding box (any two opposite corners) and reports every non-air block, every position holding fluid, and counts of air and unloaded positions. Max volume `maxScanVolume` (default 32,768).
+
+Fluid is reported separately because a position can be fluid-filled while its block type reads as air.
+
+**Example Prompt:**
+> "Scan the area around my base and tell me what's there"
+
+**Parameters:**
+- `x1`, `y1`, `z1` (int, required): First corner
+- `x2`, `y2`, `z2` (int, required): Opposite corner
+- `world` (string, required): World UUID
+
+#### `replace_blocks_in_region`
+
+Scans a bounding box for every block matching `matchBlockType` and replaces it - a server-side find-and-replace, instead of reading a region and writing back thousands of individual blocks. Max volume `maxReplaceVolume` (default 500,000).
+
+Omit `replaceBlockType` for a read-only dry run that reports what *would* change.
+
+**Example Prompt:**
+> "Replace all the dirt in this region with stone"
+> "How much sand is in this area?" (dry run)
+
+**Parameters:**
+- `x1`, `y1`, `z1` (int, required): First corner
+- `x2`, `y2`, `z2` (int, required): Opposite corner
+- `world` (string, required): World UUID
+- `matchBlockType` (string, required): Block type to search for
+- `replaceBlockType` (string, optional): Replacement. Omit for a dry run.
+
+#### `get_heightmap`
+
+Gets the ground surface height and top block type for every column in an X/Z area, plus the water surface above it if any. A compact terrain-shape query for road routing, river finding, and build siting - much lighter than `scan_region` over the same footprint. Max `maxHeightmapSamples` (default 10,000).
+
+**Example Prompt:**
+> "What does the terrain look like between my base and the river?"
+
+**Parameters:**
+- `x1`, `z1` (int, required): First corner
+- `x2`, `z2` (int, required): Opposite corner
+- `world` (string, required): World UUID
+- `stride` (int, optional): Sample every Nth block per axis. Default 1; use a larger stride for a coarse scan of a large area.
+- `skipFoliage` (boolean, optional): Walk down past overhanging tree canopy to report actual ground instead of the literal topmost block. Default true.
+
+#### `verify_placement`
+
+Verifies a list of expected block placements against live world state in one call, replacing one `get_block` per position.
+
+**Example Prompt:**
+> "Did that whole structure actually place correctly?"
+
+**Parameters:**
+- `world` (string, required): World UUID
+- `blocks` (array, required): List of `{x, y, z, blockType}` expected placements
+- `checkSupport` (boolean, optional): Also flag any entry whose position below is air or unloaded - i.e. floating with nothing underneath. Default false.
+
+---
+
+### Shape Generators
+
+All generators are **pure geometry**. They compute a block plan and return it *without modifying the world*, so the plan can be inspected or edited before being passed to `set_blocks_batch`.
+
+#### `generate_sphere`
+
+Computes a sphere or hollow spherical shell around a center point.
+
+**Parameters:**
+- `x`, `y`, `z` (int): Center coordinates
+- `radius` (int, required): Radius in blocks
+- `blockType` (string, required): Block type to fill with
+- `hollow` (boolean, optional): Shell instead of solid ball. Default false.
+- `shellThickness` (int, optional): Shell thickness when hollow. Default 1.
+
+#### `generate_cylinder`
+
+Computes a vertical cylinder or hollow cylindrical shell - towers, pillars, silos.
+
+**Parameters:**
+- `x`, `y`, `z` (int): Base center; the cylinder rises from here
+- `radius`, `height` (int, required): Dimensions in blocks
+- `blockType` (string, required): Block type to fill with
+- `hollow` (boolean, optional): Wall only. Default false.
+- `shellThickness` (int, optional): Wall thickness when hollow. Default 1.
+- `capBottom`, `capTop` (boolean, optional): Fill the end discs solid even when hollow. Default false.
+
+#### `generate_staircase`
+
+Computes a staircase ascending from a base landing in one cardinal direction.
+
+**Parameters:**
+- `x`, `y`, `z` (int): Base landing coordinates
+- `direction` (string, required): `North`, `South`, `East`, or `West`
+- `steps`, `width` (int, required): Step count, and width perpendicular to travel
+- `blockType` (string, required): Block type
+- `stepDepth` (int, optional): Horizontal run per step. Default 1.
+- `stepHeight` (int, optional): Vertical rise per step. Default 1.
+- `hollow` (boolean, optional): Place only each step's tread instead of backfilling solid to the landing. Default false, which avoids floating overhangs.
+
+#### `generate_lattice_column`
+
+Computes a tall thin lattice tower - vertical corner posts evenly spaced around a circle, optionally connected by horizontal ring braces.
+
+**Parameters:**
+- `x`, `y`, `z` (int): Base center
+- `height`, `radius` (int, required): Tower height, and distance from center axis to each post
+- `postCount` (int, required): Number of corner posts (e.g. 4 for a square tower)
+- `postBlockType` (string, required): Block type for the posts
+- `braceBlockType` (string, optional): Block type for ring braces. Omit for posts only.
+- `braceInterval` (int, optional): Height between braces. Required if `braceBlockType` is given; a ring is always placed at the base.
+
+#### `generate_road_corridor`
+
+Computes a road or path from a chain of waypoints, with consecutive pairs forming straight segments. Enforces a maximum grade of 1 block of rise per 2 of horizontal travel.
+
+**Parameters:**
+- `waypoints` (array, required): Ordered list of 2+ `{x, y, z}` points
+- `width` (int, required): Total path width (e.g. 3 for a cardinal road, 4-5 for a diagonal)
+- `blockType` (string, required): Path surface block type
+- `shoulderWidth` (int, optional): Width of a same-elevation shoulder each side. Omit or 0 for none.
+- `shoulderBlockType` (string, optional): Required if `shoulderWidth` > 0.
+
+---
+
+### NPCs
+
+#### `spawn_npc`
+
+Spawns an NPC by role name. Either give explicit coordinates, or a player to spawn near.
+
+**Example Prompt:**
+> "Spawn a guard in front of me"
+
+**Parameters:**
+- `world` (string, required): World UUID
+- `role` (string, required): Role name - see `list_npc_roles`
+- `player` (string, optional): Player to spawn near. Required if `x`/`y`/`z` omitted.
+- `offsetForward` (number, optional): Blocks in front of the player along their facing yaw. Default 3.
+- `x`, `y`, `z` (number, optional): Explicit coordinates. Required together if `player` omitted.
+
+#### `despawn_npc`
+
+Removes NPC entities near a position.
+
+**Parameters:**
+- `world` (string, required): World UUID
+- `player` or `x`/`y`/`z`: Search origin
+- `radius` (number, optional): Search radius. Default 10.
+- `all` (boolean, optional): Remove every NPC in radius rather than just the nearest. Default false.
+- `npcTypeId` (string, optional): Only remove NPCs whose role id matches exactly (case-insensitive) - use to avoid sweeping up unrelated wildlife.
+
+#### `get_npc_position`
+
+Gets live position, rotation, and role of the NPC nearest a search position.
+
+**Parameters:** same search arguments as `despawn_npc` (`world`, `player` or `x`/`y`/`z`, `radius`, `npcTypeId`)
+
+#### `set_npc_path`
+
+Assigns a patrol path to the NPC nearest a search position.
+
+**Parameters:**
+- `world` (string, required): World UUID
+- `waypoints` (array, required): Ordered list of 2+ absolute `{x, y, z}` points the NPC will walk
+- `player` or `x`/`y`/`z`: Search origin for the target NPC
+- `radius` (number, optional): Search radius. Default 10.
+
+#### `set_npc_flag`
+
+Sets a Role flag slot on the nearest matching NPC, by integer index. Flag *names* only exist at Role-build time and are not available at runtime, so slots are addressed positionally.
+
+**Parameters:**
+- `world` (string, required): World UUID
+- `flagIndex` (int, required): 0-based flag slot
+- `value` (boolean, optional): Default true.
+- `player` or `x`/`y`/`z`, `radius`, `npcTypeId`: Target search
+
+#### `start_npc_trace` / `stop_npc_trace`
+
+Starts a fine-grained trace of the NPC nearest a search position, sampling to a file on disk; `stop_npc_trace` ends it and closes the file. Useful for debugging pathing and behavior over time.
+
+**Parameters (`start_npc_trace`):**
+- `world` (string, required): World UUID
+- `player` or `x`/`y`/`z`, `radius`, `npcTypeId`: Target search. The radius is re-used each sample to re-find the NPC.
+- `intervalMs` (int, optional): Sampling interval. Default 200.
+
+`stop_npc_trace` takes no parameters.
+
+#### `list_npc_roles`
+
+Lists registered NPC role names valid for `spawn_npc`.
+
+**Parameters:**
+- `includeNonSpawnable` (boolean, optional): Also include abstract/template roles. Default false.
+
+#### `list_models`
+
+Lists registered Model asset ids usable as an NPC Role's Appearance value.
+
+**Parameters:**
+- `search` (string, optional): Case-insensitive substring filter
+
+---
+
+### Map Waypoints
+
+#### `add_waypoint`
+
+Places a waypoint marker on a player's in-game world map at the given X/Z. Personal by default; `shared=true` makes it visible to everyone. Returns the marker id needed by `remove_waypoint`.
+
+Placement is bounded by the player's view radius - the marker must land within their currently visible range, not anywhere on the map.
+
+**Parameters:**
+- `player` (string, required): Player name or UUID
+- `x`, `z` (int, required): World coordinates
+- `name` (string, required): Marker label, max 24 characters
+- `world` (string, required): World UUID
+- `icon` (string, optional): Marker icon filename. Defaults to `UserA.png`, the icon the in-game Quick Marker button uses - deliberately *not* the engine's own default `User1.png`, which is a missing asset that silently fails to render.
+- `colorHex` (string, optional): Tint, e.g. `#ffcc00`. Default none.
+- `shared` (boolean, optional): Visible to all players. Default false.
+
+#### `list_waypoints`
+
+Lists the markers currently on a player's map - their personal markers plus any shared markers in that world.
+
+**Parameters:**
+- `player` (string, required): Player name or UUID
+- `world` (string, required): World UUID
+
+#### `remove_waypoint`
+
+Removes a marker by id, personal or shared.
+
+**Parameters:**
+- `player` (string, required): Player name or UUID
+- `markerId` (string, required): From `add_waypoint`'s response or `list_waypoints`
+- `world` (string, required): World UUID
+
+---
+
+### Discovery
+
+#### `list_items`
+
+Lists real Item asset ids - weapons, tools, armor, food. Items live in a separate registry from Blocks, so `list_blocks` does not surface them.
+
+**Parameters:**
+- `search` (string, optional): Case-insensitive substring filter
+- `category` (string, optional): Exact category, e.g. `Weapon.Sword`
+- `limit` (int, optional): Maximum results
+
+#### `get_building_guide`
+
+Returns the complete Hytale construction guide for AI agents - block names, coordinate rules, support and gravity constraints, and blueprints. Call this before `set_blocks_batch`; it is what keeps a generated structure from collapsing or floating.
+
+Takes no parameters.
 
 ### MCP Protocol Endpoints
 
